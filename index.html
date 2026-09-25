@@ -255,6 +255,7 @@
 <div class="stage-note">
   <strong>URO-CARE WhatsApp assistant</strong>
   <span>clickable prototype</span>
+  <button class="reset" id="resumeBtn" type="button" hidden>Resume assistant</button>
   <button class="reset" id="reset" type="button">Restart chat</button>
 </div>
 
@@ -370,19 +371,24 @@
     return row;
   }
 
-  function systemNotice(text){
-    const n = document.createElement('div');
-    n.className = 'notice sys';
-    n.textContent = text;
-    thread.appendChild(n);
+  let pendingNotices = [];
+  function systemNotice(text){ pendingNotices.push(text); }
+  function flushNotices(){
+    pendingNotices.forEach(text => {
+      const n = document.createElement('div');
+      n.className = 'notice sys';
+      n.textContent = text;
+      thread.appendChild(n);
+    });
+    pendingNotices = [];
     scroll();
   }
 
-  function userSays(text){
+  function userSays(text, read){
     const row = push('out', fmt(text), true);
     const tick = row.querySelector('.tick');
     tick.classList.remove('read');
-    setTimeout(()=>tick.classList.add('read'), 900);
+    if(read !== false) setTimeout(() => tick.classList.add('read'), 900);
   }
 
   /* Cloud API limits, checked as things render so future edits stay sendable.
@@ -691,13 +697,13 @@
 
     if(token === 'human'){
       state.mode = 'human';
-      state.paused = true;
-      systemNotice('Automated replies paused \u2014 the front desk has been notified.');
-      return [
-        {text:"Connecting you to the front desk. Someone replies within a few minutes during working hours.", wait:700},
-        {text:"Hi, Esther here from reception \ud83d\udc4b I can see your chat. What can I help you with?", wait:1600,
-         buttons:[{label:'Back to assistant', value:'nav:resume'}, NAV_MENU]}
-      ];
+      setPaused(true);
+      systemNotice('Automated replies paused. Waiting for reception to reply.');
+      return [{
+        text:"I've passed this to our front desk. Someone will reply here during working hours.\n\n" + HOURS_LINE,
+        wait:700,
+        buttons:[{label:'Back to assistant', value:'nav:resume'}, NAV_MENU]
+      }];
     }
 
     if(token === 'privacy'){
@@ -774,19 +780,20 @@
   const TYPED_STEPS = {'book-name':1, 'book-custom':1, 'results':1};
 
   function handoff(){
-    state.paused = true;
+    setPaused(true);
     state.mode = 'human';
-    systemNotice('Automated replies paused \u2014 the front desk has been notified.');
-    return [
-      {text:"Thanks for writing. Let me pass this to our team so a person can answer you properly.", wait:800},
-      {text:"Hi, Grace here from reception \ud83d\udc4b I've read your message and I'm looking into it now.", wait:1800,
-       buttons:[{label:'Back to assistant', value:'nav:resume'}, NAV_MENU]}
-    ];
+    systemNotice('Automated replies paused. The message is unread and waiting for reception.');
+    return [];                       // the bot says nothing at all
   }
 
   function resume(){
-    state.paused = false;
+    setPaused(false);
     systemNotice('Assistant resumed.');
+  }
+
+  function setPaused(on){
+    state.paused = on;
+    document.getElementById('resumeBtn').hidden = !on;
   }
 
   function route(text, value){
@@ -804,7 +811,7 @@
       if(/^cancel$/.test(t)){
         trail = ['menu'];
         state.mode = 'menu';
-        state.paused = false;
+        setPaused(false);
         return [{text:"Your slot has been released. Nothing else is needed from you.", buttons:[{label:'Book another time', value:'book'}, NAV_MENU]}];
       }
       if(state.paused) return [];              // silence: the agent is handling it
@@ -896,9 +903,10 @@
   /* ---------- input ---------- */
   function send(text, value){
     if(busy || (!text && !value)) return;
-    userSays(text);
     const out = route(text, value);
-    if(!out || !out.length) return;   // paused: a human is answering, the bot says nothing
+    userSays(text, !state.paused);     // stays on delivered ticks until a person reads it
+    flushNotices();
+    if(!out || !out.length) return;    // paused: the bot says nothing, the message waits
     setTimeout(() => botSay(out), 250);
   }
 
@@ -914,7 +922,8 @@
   function boot(){
     thread.innerHTML = '';
     state.mode = 'menu';
-    state.paused = false;
+    setPaused(false);
+    pendingNotices = [];
     trail = ['menu'];
     Object.keys(booking).forEach(k => delete booking[k]);
     busy = false;
@@ -927,6 +936,12 @@
     thread.appendChild(n);
     botSay(greeting());
   }
+  document.getElementById('resumeBtn').addEventListener('click', () => {
+    if(!state.paused) return;
+    const out = route(null, 'nav:resume');
+    flushNotices();
+    botSay(out);
+  });
   document.getElementById('reset').addEventListener('click', boot);
   boot();
 })();
