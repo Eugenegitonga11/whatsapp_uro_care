@@ -124,6 +124,7 @@
     padding:7px 12px;border-radius:7px;box-shadow:var(--wa-shadow);
   }
 
+  .notice.sys{background:#e7edf0;color:#54656f}
   .row{display:flex;margin:1px 0;padding:0 4px}
   .row.in{justify-content:flex-start}
   .row.out{justify-content:flex-end}
@@ -326,8 +327,31 @@
   const scroll = () => { thread.scrollTop = thread.scrollHeight; };
 
   const day = d => d.toLocaleDateString([], {weekday:'long'});
-  const tomorrow = () => { const d = new Date(); d.setDate(d.getDate()+1); return day(d); };
-  const laterWeek = () => { const d = new Date(); d.setDate(d.getDate()+3); return day(d); };
+
+  /* Clinic hours: Mon-Fri 8:30am-5:30pm, Sat 9:00am-1:00pm, closed Sunday. */
+  const HOURS = {
+    weekday:{open:9,  close:17, text:'9:00am to 5:00pm'},
+    sat:    {open:10, close:15, text:'10:00am to 3:00pm'}
+  };
+  const HOURS_LINE = "We're open Monday to Friday, " + HOURS.weekday.text + ", and Saturday, " + HOURS.sat.text + ". Closed Sundays.";
+  const hoursFor = d => d.getDay() === 0 ? null : (d.getDay() === 6 ? HOURS.sat : HOURS.weekday);
+
+  // the next open days, skipping Sundays
+  function openDays(n){
+    const out = [], d = new Date();
+    while(out.length < n){
+      d.setDate(d.getDate() + 1);
+      if(hoursFor(d)) out.push(new Date(d));
+    }
+    return out;
+  }
+
+  // a time that actually falls inside that day's hours
+  function slotOn(d, second){
+    const sat = d.getDay() === 6;
+    const time = sat ? '10:30am' : (second ? '2:30pm' : '10:00am');
+    return {label: day(d) + ', ' + time, note: sat ? 'Saturday clinic, closes 3:00pm' : (second ? 'Afternoon clinic' : 'With the specialist on duty')};
+  }
   const ref = () => 'UC-' + Math.floor(40000 + Math.random()*9000);
 
   /* ---------- rendering ---------- */
@@ -346,6 +370,14 @@
     return row;
   }
 
+  function systemNotice(text){
+    const n = document.createElement('div');
+    n.className = 'notice sys';
+    n.textContent = text;
+    thread.appendChild(n);
+    scroll();
+  }
+
   function userSays(text){
     const row = push('out', fmt(text), true);
     const tick = row.querySelector('.tick');
@@ -353,7 +385,25 @@
     setTimeout(()=>tick.classList.add('read'), 900);
   }
 
+  /* Cloud API limits, checked as things render so future edits stay sendable.
+     Anything logged here would be rejected by the real API. */
+  const LIMITS = {button:20, listButton:20, rowTitle:24, rowDesc:72, section:24, rows:10, body:1024, buttons:3};
+  const over = (what, text, max) => {
+    if(text && text.length > max) console.warn('WhatsApp limit: ' + what + ' is ' + text.length + '/' + max + ' \u2014 "' + text + '"');
+  };
+  function lintButtons(buttons){
+    if(buttons.length > LIMITS.buttons) console.warn('WhatsApp limit: ' + buttons.length + ' buttons, max ' + LIMITS.buttons);
+    buttons.forEach(b => over('button title', b.label, LIMITS.button));
+  }
+  function lintList(list){
+    over('list button', list.label, LIMITS.listButton);
+    over('section title', list.title, LIMITS.section);
+    if(list.rows.length > LIMITS.rows) console.warn('WhatsApp limit: ' + list.rows.length + ' rows, max ' + LIMITS.rows);
+    list.rows.forEach(r => { over('row title', r.title, LIMITS.rowTitle); over('row description', r.desc, LIMITS.rowDesc); });
+  }
+
   function attachButtons(row, buttons){
+    lintButtons(buttons);
     const box = document.createElement('div');
     box.className = 'actions';
     buttons.forEach(b => {
@@ -367,6 +417,7 @@
   }
 
   function attachList(row, list){
+    lintList(list);
     const box = document.createElement('div');
     box.className = 'actions';
     const el = document.createElement('button');
@@ -422,6 +473,7 @@
   }
 
   function bodyOf(m){
+    over('message body', m.text, LIMITS.body);
     let html = '';
     if(m.map) html += '<div class="map" role="img" aria-label="Map showing the clinic location"></div>';
     html += fmt(m.text);
@@ -465,35 +517,37 @@
     {id:'paed',     name:'Paediatric',         desc:'Bedwetting and recurring infections'}
   ];
 
+  // Row titles must fit 24 chars and descriptions 72, so the full clinical name
+  // lives in the description where it is too long for the title.
   const SERVICES = {
     tumour:[
-      {name:'Renal (kidney) tumour',        desc:'Assessment and surgical treatment'},
-      {name:'Bladder tumour',               desc:'Diagnosis, resection and follow-up'},
-      {name:'Testicular tumour',            desc:'Assessment and surgical treatment'},
-      {name:'Prostate cancer',              desc:'Diagnosis, staging and treatment'},
-      {name:'Laparoscopic urinary surgery', desc:'Keyhole surgery, shorter recovery'}
+      {name:'Renal (kidney) tumour',  desc:'Assessment and surgical treatment'},
+      {name:'Bladder tumour',         desc:'Diagnosis, resection and follow-up'},
+      {name:'Testicular tumour',      desc:'Assessment and surgical treatment'},
+      {name:'Prostate cancer',        desc:'Diagnosis, staging and treatment'},
+      {name:'Laparoscopic surgery',   desc:'Laparoscopic urinary surgery, keyhole, shorter recovery'}
     ],
     prostate:[
-      {name:'Prostate and cancer screening package', desc:'PSA, examination and a written report'},
-      {name:'TRUS unit',                             desc:'Transrectal ultrasound and biopsy'},
-      {name:'Minimally invasive BPH treatment',      desc:'Rezum, laser or bipolar resection'}
+      {name:'Screening package', desc:'Prostate and cancer screening: PSA, exam and report'},
+      {name:'TRUS unit',         desc:'Transrectal ultrasound and biopsy'},
+      {name:'BPH treatment',     desc:'Minimally invasive: Rezum, laser or bipolar resection'}
     ],
     female:[
       {name:'Urinary incontinence', desc:'Assessment and treatment for leakage'}
     ],
     stone:[
-      {name:'Ultrasonic shockwave stone management (ESWL)', desc:'Stones cleared without surgery'}
+      {name:'Shockwave (ESWL)', desc:'Ultrasonic shockwave stone management, no surgery'}
     ],
     male:[
-      {name:'Infertility diagnosis',               desc:'Semen analysis and hormone work-up'},
-      {name:'Shockwave therapy for ED',            desc:'Non-surgical, given as a course'},
-      {name:'Penile implant for ED',               desc:'Surgical option when treatment fails'},
-      {name:'Pelvic floor training',               desc:'Guided muscle rehabilitation'},
-      {name:'PRP injection for ED',                desc:'Platelet-rich plasma treatment'}
+      {name:'Infertility diagnosis', desc:'Semen analysis and hormone work-up'},
+      {name:'Shockwave for ED',      desc:'Ultrasonic shockwave therapy for erectile dysfunction'},
+      {name:'Penile implant',        desc:'Implant for erectile dysfunction, surgical option'},
+      {name:'Pelvic floor training', desc:'Guided muscle rehabilitation'},
+      {name:'PRP injection for ED',  desc:'Platelet-rich plasma treatment'}
     ],
     paed:[
-      {name:'Nocturnal enuresis (bedwetting)', desc:'Assessment and treatment for children'},
-      {name:'Recurring urinary infections',    desc:'Investigation and prevention'}
+      {name:'Bedwetting',           desc:'Nocturnal enuresis, assessment and treatment for children'},
+      {name:'Recurring infections', desc:'Recurring urinary infections, investigation and prevention'}
     ]
   };
 
@@ -511,6 +565,16 @@
 
   const catName = id => CATEGORIES.find(c => c.id === id).name.toLowerCase();
 
+  // offered only while booking, never while browsing services
+  const bookingCategoryList = () => {
+    const l = categoryList();
+    return Object.assign({}, l, {
+      label:'Choose an option',
+      title:'What brings you in?',
+      rows: l.rows.concat([{title:'Prefer not to say', desc:'Discuss it with the doctor in private', value:'svc:private'}])
+    });
+  };
+
   const NAV_BACK = {label:'Back', value:'nav:back'};
   const NAV_MENU = {label:'Main menu', value:'menu'};
 
@@ -525,7 +589,7 @@
 
   const FEES = "*Consultation* \u2014 KES 4,000, about 20 to 30 minutes with the specialist.\n*Follow-up within 30 days* \u2014 KES 1,500.\n*Scans and lab work* \u2014 quoted before anything is done.\n*Procedures such as ESWL* \u2014 quoted after your assessment.\n\nYou can pay by M-Pesa, card or cash. We work with most insurers, so carry your card and ID.";
 
-  const VISIT = "*URO-CARE Urology & Andrology Center*\n4th floor,PMC, 3rd Parklands Ave, Nairobi\n\nMon to Fri, 9:00am to 5:00pm\nSaturday, 10:00am to 3:00pm\nSundays and public holidays, closed\n\nSecure parking is available in the basement.";
+  const VISIT = "*URO-CARE Urology & Andrology Center*\n4th Floor, PMC, 3rd Parklands Avenue, Nairobi\n\nMon to Fri, 9:00am to 5:00pm\nSaturday, 10:00am to 3:00pm\nSundays and public holidays, closed\n\n\ud83d\udcde +254 112 268 709\n\u2709\ufe0f admin@urocare.co.ke";
 
   const greeting = () => ([
     {text:"Hello \ud83d\udc4b You're chatting with *URO-CARE Urology & Andrology Center* in Nairobi.\n\nI can book you a consultation, explain our services, or pass you to the front desk. Whatever you share here stays between you and the clinic.", wait:600, list:MENU}
@@ -533,18 +597,47 @@
 
   /* ---------- screens and navigation ---------- */
   const booking = {};
-  const state = {mode:'menu'};
+  const state = {mode:'menu', paused:false};
   let trail = ['menu'];
 
-  const slotList = () => ({
-    label:'Pick a time',
-    title:'Open this week',
-    rows:[
-      {title:tomorrow() + ', 10:00am', desc:'With the specialist on duty', value:'slot:' + tomorrow() + ', 10:00am'},
-      {title:laterWeek() + ', 2:30pm', desc:'Afternoon clinic',            value:'slot:' + laterWeek() + ', 2:30pm'},
-      {title:'Another time',           desc:'Tell us what suits you',      value:'slot:other'}
-    ]
-  });
+  const slotList = () => {
+    const d = openDays(2);
+    const a = slotOn(d[0], false), b = slotOn(d[1], true);
+    return {
+      label:'Pick a time',
+      title:'Open this week',
+      rows:[
+        {title:a.label, desc:a.note, value:'slot:' + a.label},
+        {title:b.label, desc:b.note, value:'slot:' + b.label},
+        {title:'Another time', desc:'Tell us what suits you', value:'slot:other'}
+      ]
+    };
+  };
+
+  // light guard on a typed day/time; the real diary check belongs server-side
+  function whyClosed(text){
+    const t = text.toLowerCase();
+    if(/\b(sun|sunday|jumapili)\b/.test(t))
+      return "We're closed on Sundays, so I can't book that. " + HOURS_LINE + "\n\nWhat other day and time suits you?";
+    if(/\b(night|usiku|midnight)\b/.test(t))
+      return "That's outside our hours. " + HOURS_LINE + "\n\nWhat time would work?";
+
+    const sat = /\b(sat|saturday|jumamosi)\b/.test(t);
+    const m = t.match(/(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m|p\.?m)?/);
+    if(m){
+      let h = +m[1];
+      const min = m[2] ? +m[2] : 0, ap = m[3];
+      if(ap && ap[0] === 'p' && h < 12) h += 12;
+      if(ap && ap[0] === 'a' && h === 12) h = 0;
+      if(!ap && h <= 7) h += 12;                 // "at 5" means 5pm here
+      const hr = h + min / 60;
+      const win = sat ? HOURS.sat : HOURS.weekday;
+      if(hr < win.open || hr > win.close)
+        return (sat ? "On Saturdays we're open " + HOURS.sat.text : "Monday to Friday we're open " + HOURS.weekday.text) +
+               ", so that time won't work.\n\nWhat else would suit you?";
+    }
+    return null;
+  }
 
   function screen(token){
     if(token === 'menu'){
@@ -598,9 +691,12 @@
 
     if(token === 'human'){
       state.mode = 'human';
+      state.paused = true;
+      systemNotice('Automated replies paused \u2014 the front desk has been notified.');
       return [
         {text:"Connecting you to the front desk. Someone replies within a few minutes during working hours.", wait:700},
-        {text:"Hi, Grace here from reception \ud83d\udc4b I can see your chat. What can I help you with?", wait:1600, buttons:[NAV_BACK, NAV_MENU]}
+        {text:"Hi, Grace here from reception \ud83d\udc4b I can see your chat. What can I help you with?", wait:1600,
+         buttons:[{label:'Back to assistant', value:'nav:resume'}, NAV_MENU]}
       ];
     }
 
@@ -622,7 +718,10 @@
 
     if(token === 'book-cat'){
       state.mode = 'book-service';
-      return [{text:"Thank you, " + booking.name + ". What are you coming in for?", list:navList(categoryList())}];
+      return [{
+        text:"Thank you, " + booking.name + ". What are you coming in for?\n\nIf you'd rather not say here, that's completely fine \u2014 choose the last option.",
+        list:navList(bookingCategoryList())
+      }];
     }
 
     if(token.indexOf('bookcat:') === 0){
@@ -634,20 +733,21 @@
     if(token === 'book-time'){
       state.mode = 'book-time';
       return [{
-        text:"Here's what's open this week" + (booking.service ? " for " + booking.service.toLowerCase() : "") + ".",
+        text:(booking.private ? "Of course. You can explain it to the doctor in the room, and nothing about your reason is kept in this chat.\n\n" : "") +
+             "Here's what's open this week" + (booking.service && !booking.private ? " for " + booking.service.toLowerCase() : "") + ".\n\n" + HOURS_LINE,
         list: navList(slotList())
       }];
     }
 
     if(token === 'book-custom'){
       state.mode = 'book-custom';
-      return [{text:"No problem. Type the day and time that suits you, for example \"Friday morning\".", buttons:[NAV_BACK, NAV_MENU]}];
+      return [{text:"No problem. Type the day and time that suits you, for example \"Friday morning\".\n\n" + HOURS_LINE, buttons:[NAV_BACK, NAV_MENU]}];
     }
 
     if(token === 'book-confirm'){
       state.mode = 'book-confirm';
       return [{
-        text:"Here's your booking:\n\n*Name* " + booking.name + "\n*Service* " + booking.service + "\n*When* " + booking.slot + "\n\nShall I confirm it?",
+        text:"Here's your booking:\n\n*Name* " + booking.name + "\n*Service* " + (booking.private ? 'Not stated \u2014 private to the doctor' : booking.service) + "\n*When* " + booking.slot + "\n\nShall I confirm it?",
         buttons:[{label:'Confirm', value:'confirm'}, NAV_BACK, NAV_MENU]
       }];
     }
@@ -655,7 +755,7 @@
     if(token === 'booked'){
       state.mode = 'menu';
       return [{
-        text:"Booked \u2705\n\n*" + booking.ref + "*\n" + booking.name + "\n" + booking.service + "\n" + booking.slot + "\n\nCome 10 minutes early with your ID and insurance card. We'll send a reminder the day before. Reply CANCEL any time to release the slot.",
+        text:"Booked \u2705\n\n*" + booking.ref + "*\n" + booking.name + "\n" + (booking.private ? 'Reason private to the doctor' : booking.service) + "\n" + booking.slot + "\n\nCome 10 minutes early with your ID and insurance card. We'll send a reminder the day before. Reply CANCEL any time to release the slot.",
         buttons:[{label:'Change this booking', value:'book'}, NAV_MENU]
       }];
     }
@@ -669,20 +769,52 @@
   const home = ()    => { trail = ['menu']; return screen('menu'); };
 
   /* ---------- router ---------- */
-  const SYMPTOMS = /(pain|burning|blood|swell|lump|stone|prostate|erect|sperm|fertil|urin|pee|testic|kidney|bladder|infection|uti|discharge|leak|circumcis|vasectom|hydrocele|eswl|cancer|tumou?r|wetting)/i;
+  // The only screens where typing is the expected answer. Anywhere else, a typed
+  // message means the menu didn't fit the person's need, so a human takes over.
+  const TYPED_STEPS = {'book-name':1, 'book-custom':1, 'results':1};
+
+  function handoff(){
+    state.paused = true;
+    state.mode = 'human';
+    systemNotice('Automated replies paused \u2014 the front desk has been notified.');
+    return [
+      {text:"Thanks for writing. Let me pass this to our team so a person can answer you properly.", wait:800},
+      {text:"Hi, Grace here from reception \ud83d\udc4b I've read your message and I'm looking into it now.", wait:1800,
+       buttons:[{label:'Back to assistant', value:'nav:resume'}, NAV_MENU]}
+    ];
+  }
+
+  function resume(){
+    state.paused = false;
+    systemNotice('Assistant resumed.');
+  }
 
   function route(text, value){
     const raw = (value || text || '').trim();
     const t = raw.toLowerCase();
+    const tapped = !!value;
 
-    if(t === 'nav:back' || /^(back|rudi)$/.test(t)) return back();
-    if(t === 'menu' || /^(main menu|menu|options|help|start)$/.test(t)) return home();
-
-    if(/^cancel$/.test(t)){
-      trail = ['menu'];
-      state.mode = 'menu';
-      return [{text:"Your slot has been released. Nothing else is needed from you.", buttons:[{label:'Book another time', value:'book'}, NAV_MENU]}];
+    if(t === 'nav:resume'){
+      resume();
+      return screen(trail[trail.length - 1]);
     }
+
+    if(!tapped){
+      // CANCEL stays live because the booking confirmation tells people to send it
+      if(/^cancel$/.test(t)){
+        trail = ['menu'];
+        state.mode = 'menu';
+        state.paused = false;
+        return [{text:"Your slot has been released. Nothing else is needed from you.", buttons:[{label:'Book another time', value:'book'}, NAV_MENU]}];
+      }
+      if(state.paused) return [];              // silence: the agent is handling it
+      if(!TYPED_STEPS[state.mode]) return handoff();
+    } else if(state.paused){
+      resume();                                 // tapping the menu brings the bot back
+    }
+
+    if(t === 'nav:back') return back();
+    if(t === 'menu')     return home();
 
     /* whatever the current screen is waiting for */
     switch(state.mode){
@@ -692,23 +824,34 @@
         return booking.service ? go('book-time') : go('book-cat');
 
       case 'book-service':
+        if(t === 'svc:private'){
+          booking.private = true;
+          booking.service = 'Prefer not to say';
+          return go('book-time');
+        }
         if(t.indexOf('cat:') === 0) return go('bookcat:' + t.slice(4));
         if(t.indexOf('svc:') === 0){
           const p = t.split(':');
           booking.service = SERVICES[p[1]][+p[2]].name;
+          delete booking.private;
           return go('book-time');
         }
-        booking.service = raw;
-        return go('book-time');
+        break;
 
       case 'book-time':
         if(t === 'slot:other') return go('book-custom');
-        booking.slot = t.indexOf('slot:') === 0 ? raw.slice(5) : raw;
-        return go('book-confirm');
+        if(t.indexOf('slot:') === 0){
+          booking.slot = raw.slice(5);
+          return go('book-confirm');
+        }
+        break;
 
-      case 'book-custom':
+      case 'book-custom': {
+        const shut = whyClosed(raw);
+        if(shut) return [{text:shut, buttons:[NAV_BACK, NAV_MENU]}];   // stay on this step
         booking.slot = raw;
         return go('book-confirm');
+      }
 
       case 'book-confirm':
         if(t === 'confirm'){
@@ -726,52 +869,37 @@
             buttons:[{label:'Book a review', value:'book'}, NAV_BACK, NAV_MENU]
           }];
         }
-        return [{
-          text:"I can't find that reference. Check the slip again, or the front desk can look it up for you.",
-          buttons:[{label:'Talk to the front desk', value:'human'}, NAV_BACK, NAV_MENU]
-        }];
-
-      case 'human':
-        return [{text:"Thanks, I've noted that down. Let me check with the doctor's diary and come back to you shortly.", buttons:[NAV_BACK, NAV_MENU]}];
+        return handoff();                        // unknown reference, let a person check
     }
 
-    /* taps from anywhere else */
+    /* taps */
     if(t.indexOf('cat:') === 0 || t.indexOf('svc:') === 0) return go(t);
 
     if(t.indexOf('book:') === 0){
       const p = t.split(':');
       booking.service = SERVICES[p[1]][+p[2]].name;
+      delete booking.private;
       return go('book');
     }
 
-    if(t === 'book' || /\b(book|appointment|appoint|see a doctor|consult)\b/.test(t)){
-      delete booking.service;
-      return go('book');
-    }
+    if(t === 'book'){ delete booking.service; delete booking.private; return go('book'); }
+    if(t === 'services') return go('services');
+    if(t === 'fees')     return go('fees');
+    if(t === 'visit')    return go('visit');
+    if(t === 'results')  return go('results');
+    if(t === 'human')    return go('human');
+    if(t === 'privacy')  return go('privacy');
 
-    if(t === 'services' || /\b(service|treat|offer|do you do)\b/.test(t))            return go('services');
-    if(t === 'fees'     || /\b(fee|cost|price|charge|pay|insur|nhif|sha|mpesa|m-pesa)\b/.test(t)) return go('fees');
-    if(t === 'visit'    || /\b(where|location|address|direction|hour|open|time|park)\b/.test(t))  return go('visit');
-    if(t === 'results'  || /\b(result|lab|report|scan)\b/.test(t))                   return go('results');
-    if(t === 'human'    || /\b(agent|human|person|reception|front desk|call me|talk to)\b/.test(t)) return go('human');
-    if(/\b(privacy|private|confidential|secret|discreet)\b/.test(t))                 return go('privacy');
-    if(/^(hi|hello|hey|niaje|habari|sasa|mambo)\b/.test(t))                          return home();
-
-    if(SYMPTOMS.test(t)){
-      return [{
-        text:"Thanks for telling me. I can't examine you or give a diagnosis over chat, but a specialist can see you and say exactly what's going on. Most cases like this are straightforward to treat once assessed.",
-        buttons:[{label:'Book a consultation', value:'book'}, {label:'Talk to the front desk', value:'human'}, NAV_MENU]
-      }];
-    }
-
-    return [{text:"I didn't quite catch that. Here's what I can help with.", list:MENU}];
+    return handoff();
   }
 
   /* ---------- input ---------- */
   function send(text, value){
     if(busy || (!text && !value)) return;
     userSays(text);
-    setTimeout(() => botSay(route(text, value)), 250);
+    const out = route(text, value);
+    if(!out || !out.length) return;   // paused: a human is answering, the bot says nothing
+    setTimeout(() => botSay(out), 250);
   }
 
   composer.addEventListener('submit', e => {
@@ -786,6 +914,7 @@
   function boot(){
     thread.innerHTML = '';
     state.mode = 'menu';
+    state.paused = false;
     trail = ['menu'];
     Object.keys(booking).forEach(k => delete booking[k]);
     busy = false;
