@@ -573,7 +573,7 @@
     {id:'tumour',   name:'Tumour',             desc:'Kidney, bladder, testicular and prostate cancer'},
     {id:'prostate', name:'Prostate',           desc:'Screening, TRUS biopsy, BPH treatment'},
     {id:'female',   name:'Female urology',     desc:'Urinary incontinence'},
-    {id:'stone',    name:'Stone management',   desc:'Shockwave stone treatment'},
+    {id:'stone',    name:'Stone management',   desc:'ESWL, ureteroscopy, PCNL, laser and open surgery'},
     {id:'male',     name:'Male sexual health', desc:'Fertility and erectile dysfunction care'},
     {id:'paed',     name:'Paediatric',         desc:'Bedwetting and recurring infections'}
   ];
@@ -583,21 +583,24 @@
   const SERVICES = {
     tumour:[
       {name:'Renal (kidney) tumour',  desc:'Assessment and surgical treatment'},
-      {name:'Bladder tumour',         desc:'Diagnosis, resection and follow-up'},
+      {name:'Bladder tumour',         desc:'Diagnosis, treatment and follow-up'},
       {name:'Testicular tumour',      desc:'Assessment and surgical treatment'},
-      {name:'Prostate cancer',        desc:'Diagnosis, staging and treatment'},
-      {name:'Laparoscopic surgery',   desc:'Laparoscopic urinary surgery, keyhole, shorter recovery'}
+      {name:'Prostate cancer',        desc:'Diagnosis, staging, treatment and follow-up'}
     ],
     prostate:[
       {name:'Screening package', desc:'Prostate and cancer screening: PSA, exam and report'},
       {name:'TRUS unit',         desc:'Transrectal ultrasound and biopsy'},
-      {name:'BPH treatment',     desc:'Minimally invasive: Rezum, laser or bipolar resection'}
+      {name:'BPH treatment',     desc:'Minimally invasive: Rezum water vapour or bipolar resection'}
     ],
     female:[
       {name:'Urinary incontinence', desc:'Assessment and treatment for leakage'}
     ],
     stone:[
-      {name:'Shockwave (ESWL)', desc:'Ultrasonic shockwave stone management, no surgery'}
+      {name:'Shockwave (ESWL)',      desc:'Ultrasonic shockwave stone management, no surgery'},
+      {name:'Flexible ureteroscopy', desc:'Minimally invasive, a scope passed through the urinary tract'},
+      {name:'PCNL',                  desc:'Percutaneous nephrolithotomy, minimally invasive, larger stones'},
+      {name:'Laser disintegration',  desc:'Minimally invasive, the stone is broken up by laser'},
+      {name:'Open surgery',          desc:'For complex stones when other options are not suitable'}
     ],
     male:[
       {name:'Infertility diagnosis', desc:'Semen analysis and hormone work-up'},
