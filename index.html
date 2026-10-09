@@ -619,11 +619,13 @@
     label: label || 'Choose a category',
     title: 'Services by category',
     rows: CATEGORIES.map(c => {
-      const row = {title:c.name, desc:c.desc, value:'cat:' + c.id};
-      // a category with one service needs no drawer, tapping it goes straight there
-      if(SERVICES[c.id].length > 1)
-        row.children = SERVICES[c.id].map((x, i) => ({title:x.name, desc:x.desc, value:'svc:' + c.id + ':' + i}));
-      return row;
+      // every category opens a drawer, so the list behaves the same way throughout
+      return {
+        title:c.name,
+        desc:c.desc,
+        value:'cat:' + c.id,
+        children: SERVICES[c.id].map((x, i) => ({title:x.name, desc:x.desc, value:'svc:' + c.id + ':' + i}))
+      };
     })
   });
 
