@@ -237,6 +237,15 @@
   .sheet .opt:hover{background:#f5f6f6}
   .sheet .opt:focus-visible{outline:2px solid var(--wa-green);outline-offset:-3px}
   .sheet .opt b{display:block;font-size:14.6px;font-weight:500;color:var(--wa-ink)}
+  .sheet .opt.group b{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .sheet .chev{font-style:normal;color:#8696a0;font-size:19px;line-height:1;transition:transform .18s ease}
+  .sheet .opt.group.open .chev{transform:rotate(90deg)}
+  .sheet .opt.group.open{background:#f5f6f6}
+  .sheet .kids{background:#f7f9fa;border-bottom:1px solid var(--wa-line)}
+  .sheet .opt.kid{background:transparent;border-bottom:0;padding:10px 16px 10px 30px;position:relative}
+  .sheet .opt.kid::before{content:"";position:absolute;left:18px;top:14px;bottom:14px;width:2px;background:var(--wa-green);opacity:.35;border-radius:2px}
+  .sheet .opt.kid b{font-size:14px}
+  .sheet .opt.kid:hover{background:#eef1f2}
   .sheet .opt span{display:block;font-size:12.8px;color:var(--wa-ink-soft);margin-top:2px}
 
   @media (prefers-reduced-motion: reduce){
@@ -405,7 +414,11 @@
     over('list button', list.label, LIMITS.listButton);
     over('section title', list.title, LIMITS.section);
     if(list.rows.length > LIMITS.rows) console.warn('WhatsApp limit: ' + list.rows.length + ' rows, max ' + LIMITS.rows);
-    list.rows.forEach(r => { over('row title', r.title, LIMITS.rowTitle); over('row description', r.desc, LIMITS.rowDesc); });
+    list.rows.forEach(r => {
+      over('row title', r.title, LIMITS.rowTitle);
+      over('row description', r.desc, LIMITS.rowDesc);
+      (r.children || []).forEach(c => { over('row title', c.title, LIMITS.rowTitle); over('row description', c.desc, LIMITS.rowDesc); });
+    });
   }
 
   function attachButtons(row, buttons){
@@ -422,6 +435,8 @@
     row.querySelector('.stack').appendChild(box);
   }
 
+  let autoOpenNext = false;
+
   function attachList(row, list){
     lintList(list);
     const box = document.createElement('div');
@@ -432,6 +447,10 @@
     el.addEventListener('click', () => openSheet(list, box));
     box.appendChild(el);
     row.querySelector('.stack').appendChild(box);
+    if(autoOpenNext){                       // chain straight into the next list
+      autoOpenNext = false;
+      setTimeout(() => openSheet(list, box), 280);
+    }
   }
 
   function disable(box){
@@ -441,17 +460,53 @@
   function openSheet(list, box){
     sheetTitle.textContent = list.title || 'URO-CARE';
     sheetBody.innerHTML = '';
+
+    const pick = (label, value) => { closeSheet(); disable(box); send(label, value); };
+
     list.rows.forEach(r => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'opt';
-      b.innerHTML = '<b>' + esc(r.title) + '</b>' + (r.desc ? '<span>' + esc(r.desc) + '</span>' : '');
-      b.addEventListener('click', () => { closeSheet(); disable(box); send(r.title, r.value); });
+      b.className = 'opt' + (r.children ? ' group' : '');
+      b.innerHTML = '<b>' + esc(r.title) + (r.children ? '<i class="chev">\u203a</i>' : '') + '</b>' +
+                    (r.desc ? '<span>' + esc(r.desc) + '</span>' : '');
+
+      if(!r.children){
+        b.addEventListener('click', () => { autoOpenNext = true; pick(r.title, r.value); });
+        sheetBody.appendChild(b);
+        return;
+      }
+
+      const kids = document.createElement('div');
+      kids.className = 'kids';
+      kids.hidden = true;
+      r.children.forEach(c => {
+        const k = document.createElement('button');
+        k.type = 'button';
+        k.className = 'opt kid';
+        k.innerHTML = '<b>' + esc(c.title) + '</b>' + (c.desc ? '<span>' + esc(c.desc) + '</span>' : '');
+        k.addEventListener('click', () => pick(c.title, c.value));
+        kids.appendChild(k);
+      });
+
+      b.setAttribute('aria-expanded', 'false');
+      b.addEventListener('click', () => {
+        const opening = kids.hidden;
+        sheetBody.querySelectorAll('.kids').forEach(el => { el.hidden = true; });
+        sheetBody.querySelectorAll('.opt.group').forEach(el => { el.classList.remove('open'); el.setAttribute('aria-expanded','false'); });
+        kids.hidden = !opening;
+        b.classList.toggle('open', opening);
+        b.setAttribute('aria-expanded', String(opening));
+        if(opening) kids.scrollIntoView({block:'nearest', behavior:'smooth'});
+      });
+
       sheetBody.appendChild(b);
+      sheetBody.appendChild(kids);
     });
+
     sheetWrap.classList.add('open');
     sheetBody.querySelector('button').focus();
   }
+
   function closeSheet(){ sheetWrap.classList.remove('open'); }
   document.getElementById('sheetClose').addEventListener('click', closeSheet);
   sheetWrap.addEventListener('click', e => { if(e.target === sheetWrap) closeSheet(); });
@@ -471,7 +526,7 @@
         const row = push('in', bodyOf(m));
         if(m.buttons) attachButtons(row, m.buttons);
         if(m.list) attachList(row, m.list);
-        if(i === messages.length - 1) { busy = false; input.focus({preventScroll:true}); }
+        if(i === messages.length - 1) { busy = false; autoOpenNext = false; input.focus({preventScroll:true}); }
         scroll();
       }, delay);
       delay += 120;
@@ -560,7 +615,13 @@
   const categoryList = label => ({
     label: label || 'Choose a category',
     title: 'Services by category',
-    rows: CATEGORIES.map(c => ({title:c.name, desc:c.desc, value:'cat:' + c.id}))
+    rows: CATEGORIES.map(c => {
+      const row = {title:c.name, desc:c.desc, value:'cat:' + c.id};
+      // a category with one service needs no drawer, tapping it goes straight there
+      if(SERVICES[c.id].length > 1)
+        row.children = SERVICES[c.id].map((x, i) => ({title:x.name, desc:x.desc, value:'svc:' + c.id + ':' + i}));
+      return row;
+    })
   });
 
   const serviceList = id => ({
@@ -659,12 +720,7 @@
     if(token.indexOf('cat:') === 0){
       const id = token.slice(4);
       state.mode = 'browse';
-      return [{
-        text: SERVICES[id].length === 1
-          ? "Under " + catName(id) + " we offer this."
-          : "Here's what we offer under " + catName(id) + ".",
-        list: navList(serviceList(id))
-      }];
+      return [{text:"Here's what we offer under " + catName(id) + ".", list:navList(serviceList(id))}];
     }
 
     if(token.indexOf('svc:') === 0){
@@ -836,7 +892,15 @@
           booking.service = 'Prefer not to say';
           return go('book-time');
         }
-        if(t.indexOf('cat:') === 0) return go('bookcat:' + t.slice(4));
+        if(t.indexOf('cat:') === 0){
+          const id = t.slice(4);
+          if(SERVICES[id].length === 1){
+            booking.service = SERVICES[id][0].name;
+            delete booking.private;
+            return go('book-time');
+          }
+          return go('bookcat:' + id);
+        }
         if(t.indexOf('svc:') === 0){
           const p = t.split(':');
           booking.service = SERVICES[p[1]][+p[2]].name;
@@ -880,7 +944,11 @@
     }
 
     /* taps */
-    if(t.indexOf('cat:') === 0 || t.indexOf('svc:') === 0) return go(t);
+    if(t.indexOf('cat:') === 0){
+      const id = t.slice(4);
+      return go(SERVICES[id].length === 1 ? 'svc:' + id + ':0' : t);   // one service, no second list
+    }
+    if(t.indexOf('svc:') === 0) return go(t);
 
     if(t.indexOf('book:') === 0){
       const p = t.split(':');
