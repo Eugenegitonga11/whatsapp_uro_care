@@ -435,9 +435,7 @@
     row.querySelector('.stack').appendChild(box);
   }
 
-  let autoOpenNext = false;
-
-  function attachList(row, list){
+  function attachList(row, list, auto){
     lintList(list);
     const box = document.createElement('div');
     box.className = 'actions';
@@ -447,10 +445,7 @@
     el.addEventListener('click', () => openSheet(list, box));
     box.appendChild(el);
     row.querySelector('.stack').appendChild(box);
-    if(autoOpenNext){                       // chain straight into the next list
-      autoOpenNext = false;
-      setTimeout(() => openSheet(list, box), 280);
-    }
+    if(auto) setTimeout(() => openSheet(list, box), 280);   // every list opens on arrival
   }
 
   function disable(box){
@@ -471,7 +466,7 @@
                     (r.desc ? '<span>' + esc(r.desc) + '</span>' : '');
 
       if(!r.children){
-        b.addEventListener('click', () => { autoOpenNext = true; pick(r.title, r.value); });
+        b.addEventListener('click', () => pick(r.title, r.value));
         sheetBody.appendChild(b);
         return;
       }
@@ -525,8 +520,8 @@
         presence.textContent = 'online';
         const row = push('in', bodyOf(m));
         if(m.buttons) attachButtons(row, m.buttons);
-        if(m.list) attachList(row, m.list);
-        if(i === messages.length - 1) { busy = false; autoOpenNext = false; input.focus({preventScroll:true}); }
+        if(m.list) attachList(row, m.list, !m.quiet);
+        if(i === messages.length - 1) { busy = false; input.focus({preventScroll:true}); }
         scroll();
       }, delay);
       delay += 120;
@@ -664,7 +659,7 @@
   const VISIT = "*URO-CARE Urology & Andrology Center*\n4th Floor, PMC, 3rd Parklands Avenue, Nairobi\n\nMon to Fri, 9:00am to 5:00pm\nSaturday, 10:00am to 3:00pm\nSundays and public holidays, closed\n\n\ud83d\udcde +254 112 268 709\n\u2709\ufe0f admin@urocare.co.ke";
 
   const greeting = () => ([
-    {text:"Hello \ud83d\udc4b You're chatting with *URO-CARE Urology & Andrology Center* in Nairobi.\n\nI can book you a consultation, explain our services, or pass you to the front desk. Whatever you share here stays between you and the clinic.", wait:600, list:MENU}
+    {text:"Hello \ud83d\udc4b You're chatting with *URO-CARE Urology & Andrology Center* in Nairobi.\n\nI can book you a consultation, explain our services, or pass you to the front desk. Whatever you share here stays between you and the clinic.", wait:600, quiet:true, list:MENU}
   ]);
 
   /* ---------- screens and navigation ---------- */
@@ -974,10 +969,13 @@
   }
 
   /* ---------- input ---------- */
+  // navigation is movement, not something the patient said, so it leaves no bubble
+  const SILENT = {'menu':1, 'nav:back':1, 'nav:resume':1};
+
   function send(text, value){
     if(busy || (!text && !value)) return;
     const out = route(text, value);
-    userSays(text, !state.paused);     // stays on delivered ticks until a person reads it
+    if(!SILENT[value]) userSays(text, !state.paused);   // delivered ticks until a person reads it
     flushNotices();
     if(!out || !out.length) return;    // paused: the bot says nothing, the message waits
     setTimeout(() => botSay(out), 250);
