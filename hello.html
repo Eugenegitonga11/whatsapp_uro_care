@@ -340,11 +340,34 @@
 
   /* Clinic hours: Mon-Fri 8:30am-5:30pm, Sat 9:00am-1:00pm, closed Sunday. */
   const HOURS = {
-    weekday:{open:9,  close:17, text:'9:00am to 5:00pm'},
-    sat:    {open:10, close:15, text:'10:00am to 3:00pm'}
+    weekday:{open:9,  close:17, from:'9:00am',  text:'9:00am to 5:00pm'},
+    sat:    {open:10, close:15, from:'10:00am', text:'10:00am to 3:00pm'}
   };
   const HOURS_LINE = "We're open Monday to Friday, " + HOURS.weekday.text + ", and Saturday, " + HOURS.sat.text + ". Closed Sundays.";
   const hoursFor = d => d.getDay() === 0 ? null : (d.getDay() === 6 ? HOURS.sat : HOURS.weekday);
+
+  // is the clinic open right now, and if not, when does reception pick up again
+  function openState(){
+    const now = new Date();
+    const hr = now.getHours() + now.getMinutes() / 60;
+    const today = hoursFor(now);
+    if(today && hr >= today.open && hr < today.close) return {open:true, today:today};
+    if(today && hr < today.open) return {open:false, when:'from ' + today.from + ' today'};
+    const d = new Date(now);
+    for(let i = 1; i <= 7; i++){
+      d.setDate(d.getDate() + 1);
+      const w = hoursFor(d);
+      if(w) return {open:false, when:'from ' + w.from + (i === 1 ? ' tomorrow' : ' on ' + day(d))};
+    }
+    return {open:false, when:'during working hours'};
+  }
+
+  const replyWindow = () => {
+    const st = openState();
+    return st.open
+      ? "Someone will reply here shortly."
+      : "We're closed right now, so reception will reply " + st.when + ".";
+  };
 
   // the next open days, skipping Sundays
   function openDays(n){
@@ -435,9 +458,7 @@
     row.querySelector('.stack').appendChild(box);
   }
 
-  let autoOpenNext = false;
-
-  function attachList(row, list){
+  function attachList(row, list, auto){
     lintList(list);
     const box = document.createElement('div');
     box.className = 'actions';
@@ -447,10 +468,7 @@
     el.addEventListener('click', () => openSheet(list, box));
     box.appendChild(el);
     row.querySelector('.stack').appendChild(box);
-    if(autoOpenNext){                       // chain straight into the next list
-      autoOpenNext = false;
-      setTimeout(() => openSheet(list, box), 280);
-    }
+    if(auto) setTimeout(() => openSheet(list, box), 280);   // every list opens on arrival
   }
 
   function disable(box){
@@ -471,7 +489,7 @@
                     (r.desc ? '<span>' + esc(r.desc) + '</span>' : '');
 
       if(!r.children){
-        b.addEventListener('click', () => { autoOpenNext = true; pick(r.title, r.value); });
+        b.addEventListener('click', () => pick(r.title, r.value));
         sheetBody.appendChild(b);
         return;
       }
@@ -525,8 +543,8 @@
         presence.textContent = 'online';
         const row = push('in', bodyOf(m));
         if(m.buttons) attachButtons(row, m.buttons);
-        if(m.list) attachList(row, m.list);
-        if(i === messages.length - 1) { busy = false; autoOpenNext = false; input.focus({preventScroll:true}); }
+        if(m.list) attachList(row, m.list, !m.quiet);
+        if(i === messages.length - 1) { busy = false; input.focus({preventScroll:true}); }
         scroll();
       }, delay);
       delay += 120;
@@ -573,7 +591,7 @@
     {id:'tumour',   name:'Tumour',             desc:'Kidney, bladder, testicular and prostate cancer'},
     {id:'prostate', name:'Prostate',           desc:'Screening, TRUS biopsy, BPH treatment'},
     {id:'female',   name:'Female urology',     desc:'Urinary incontinence'},
-    {id:'stone',    name:'Stone management',   desc:'Shockwave stone treatment'},
+    {id:'stone',    name:'Stone management',   desc:'ESWL, ureteroscopy, PCNL, laser and open surgery'},
     {id:'male',     name:'Male sexual health', desc:'Fertility and erectile dysfunction care'},
     {id:'paed',     name:'Paediatric',         desc:'Bedwetting and recurring infections'}
   ];
@@ -583,21 +601,24 @@
   const SERVICES = {
     tumour:[
       {name:'Renal (kidney) tumour',  desc:'Assessment and surgical treatment'},
-      {name:'Bladder tumour',         desc:'Diagnosis, resection and follow-up'},
+      {name:'Bladder tumour',         desc:'Diagnosis, treatment and follow-up'},
       {name:'Testicular tumour',      desc:'Assessment and surgical treatment'},
-      {name:'Prostate cancer',        desc:'Diagnosis, staging and treatment'},
-      {name:'Laparoscopic surgery',   desc:'Laparoscopic urinary surgery, keyhole, shorter recovery'}
+      {name:'Prostate cancer',        desc:'Diagnosis, staging, treatment and follow-up'}
     ],
     prostate:[
       {name:'Screening package', desc:'Prostate and cancer screening: PSA, exam and report'},
       {name:'TRUS unit',         desc:'Transrectal ultrasound and biopsy'},
-      {name:'BPH treatment',     desc:'Minimally invasive: Rezum, laser or bipolar resection'}
+      {name:'BPH treatment',     desc:'Minimally invasive: Rezum water vapour or bipolar resection'}
     ],
     female:[
       {name:'Urinary incontinence', desc:'Assessment and treatment for leakage'}
     ],
     stone:[
-      {name:'Shockwave (ESWL)', desc:'Ultrasonic shockwave stone management, no surgery'}
+      {name:'Shockwave (ESWL)',      desc:'Ultrasonic shockwave stone management, no surgery'},
+      {name:'Flexible ureteroscopy', desc:'Minimally invasive, a scope passed through the urinary tract'},
+      {name:'PCNL',                  desc:'Percutaneous nephrolithotomy, minimally invasive, larger stones'},
+      {name:'Laser disintegration',  desc:'Minimally invasive, the stone is broken up by laser'},
+      {name:'Open surgery',          desc:'For complex stones when other options are not suitable'}
     ],
     male:[
       {name:'Infertility diagnosis', desc:'Semen analysis and hormone work-up'},
@@ -616,11 +637,13 @@
     label: label || 'Choose a category',
     title: 'Services by category',
     rows: CATEGORIES.map(c => {
-      const row = {title:c.name, desc:c.desc, value:'cat:' + c.id};
-      // a category with one service needs no drawer, tapping it goes straight there
-      if(SERVICES[c.id].length > 1)
-        row.children = SERVICES[c.id].map((x, i) => ({title:x.name, desc:x.desc, value:'svc:' + c.id + ':' + i}));
-      return row;
+      // every category opens a drawer, so the list behaves the same way throughout
+      return {
+        title:c.name,
+        desc:c.desc,
+        value:'cat:' + c.id,
+        children: SERVICES[c.id].map((x, i) => ({title:x.name, desc:x.desc, value:'svc:' + c.id + ':' + i}))
+      };
     })
   });
 
@@ -658,9 +681,18 @@
 
   const VISIT = "*URO-CARE Urology & Andrology Center*\n4th Floor, PMC, 3rd Parklands Avenue, Nairobi\n\nMon to Fri, 9:00am to 5:00pm\nSaturday, 10:00am to 3:00pm\nSundays and public holidays, closed\n\n\ud83d\udcde +254 112 268 709\n\u2709\ufe0f admin@urocare.co.ke";
 
-  const greeting = () => ([
-    {text:"Hello \ud83d\udc4b You're chatting with *URO-CARE Urology & Andrology Center* in Nairobi.\n\nI can book you a consultation, explain our services, or pass you to the front desk. Whatever you share here stays between you and the clinic.", wait:600, list:MENU}
-  ]);
+  const greeting = () => {
+    const st = openState();
+    const status = st.open
+      ? "Reception is in today, " + st.today.text + ", so a person can take over whenever you ask."
+      : "We're closed at the moment \u2014 reception replies " + st.when + ". I can still take a booking for you now.";
+    return [{
+      text:"Hello \ud83d\udc4b This is the automated assistant for *URO-CARE Urology & Andrology Center* in Nairobi.\n\n" +
+           "I can book you a consultation or explain our services. Ask for the front desk at any point and a person takes over. What you share here stays between you and the clinic.\n\n" +
+           status,
+      wait:600, quiet:true, list:MENU
+    }];
+  };
 
   /* ---------- screens and navigation ---------- */
   const booking = {};
@@ -756,7 +788,7 @@
       setPaused(true);
       systemNotice('Automated replies paused. Waiting for reception to reply.');
       return [{
-        text:"I've passed this to our front desk. Someone will reply here during working hours.\n\n" + HOURS_LINE,
+        text:"I've passed this to our front desk. " + replyWindow() + "\n\n" + HOURS_LINE,
         wait:700,
         buttons:[{label:'Back to assistant', value:'nav:resume'}, NAV_MENU]
       }];
@@ -838,7 +870,7 @@
   function handoff(){
     setPaused(true);
     state.mode = 'human';
-    systemNotice('Automated replies paused. The message is unread and waiting for reception.');
+    systemNotice('Automated replies paused. ' + (openState().open ? 'The message is unread and waiting for reception.' : 'Clinic closed \u2014 reception picks up ' + openState().when + '.'));
     return [];                       // the bot says nothing at all
   }
 
@@ -969,10 +1001,13 @@
   }
 
   /* ---------- input ---------- */
+  // navigation is movement, not something the patient said, so it leaves no bubble
+  const SILENT = {'menu':1, 'nav:back':1, 'nav:resume':1};
+
   function send(text, value){
     if(busy || (!text && !value)) return;
     const out = route(text, value);
-    userSays(text, !state.paused);     // stays on delivered ticks until a person reads it
+    if(!SILENT[value]) userSays(text, !state.paused);   // delivered ticks until a person reads it
     flushNotices();
     if(!out || !out.length) return;    // paused: the bot says nothing, the message waits
     setTimeout(() => botSay(out), 250);

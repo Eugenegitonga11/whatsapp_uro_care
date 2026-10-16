@@ -340,11 +340,34 @@
 
   /* Clinic hours: Mon-Fri 8:30am-5:30pm, Sat 9:00am-1:00pm, closed Sunday. */
   const HOURS = {
-    weekday:{open:9,  close:17, text:'9:00am to 5:00pm'},
-    sat:    {open:10, close:15, text:'10:00am to 3:00pm'}
+    weekday:{open:9,  close:17, from:'9:00am',  text:'9:00am to 5:00pm'},
+    sat:    {open:10, close:15, from:'10:00am', text:'10:00am to 3:00pm'}
   };
   const HOURS_LINE = "We're open Monday to Friday, " + HOURS.weekday.text + ", and Saturday, " + HOURS.sat.text + ". Closed Sundays.";
   const hoursFor = d => d.getDay() === 0 ? null : (d.getDay() === 6 ? HOURS.sat : HOURS.weekday);
+
+  // is the clinic open right now, and if not, when does reception pick up again
+  function openState(){
+    const now = new Date();
+    const hr = now.getHours() + now.getMinutes() / 60;
+    const today = hoursFor(now);
+    if(today && hr >= today.open && hr < today.close) return {open:true, today:today};
+    if(today && hr < today.open) return {open:false, when:'from ' + today.from + ' today'};
+    const d = new Date(now);
+    for(let i = 1; i <= 7; i++){
+      d.setDate(d.getDate() + 1);
+      const w = hoursFor(d);
+      if(w) return {open:false, when:'from ' + w.from + (i === 1 ? ' tomorrow' : ' on ' + day(d))};
+    }
+    return {open:false, when:'during working hours'};
+  }
+
+  const replyWindow = () => {
+    const st = openState();
+    return st.open
+      ? "Someone will reply here shortly."
+      : "We're closed right now, so reception will reply " + st.when + ".";
+  };
 
   // the next open days, skipping Sundays
   function openDays(n){
@@ -658,9 +681,18 @@
 
   const VISIT = "*URO-CARE Urology & Andrology Center*\n4th Floor, PMC, 3rd Parklands Avenue, Nairobi\n\nMon to Fri, 9:00am to 5:00pm\nSaturday, 10:00am to 3:00pm\nSundays and public holidays, closed\n\n\ud83d\udcde +254 112 268 709\n\u2709\ufe0f admin@urocare.co.ke";
 
-  const greeting = () => ([
-    {text:"Hello \ud83d\udc4b You're chatting with *URO-CARE Urology & Andrology Center* in Nairobi.\n\nI can book you a consultation, explain our services, or pass you to the front desk. Whatever you share here stays between you and the clinic.", wait:600, quiet:true, list:MENU}
-  ]);
+  const greeting = () => {
+    const st = openState();
+    const status = st.open
+      ? "Reception is in today, " + st.today.text + ", so a person can take over whenever you ask."
+      : "We're closed at the moment \u2014 reception replies " + st.when + ". I can still take a booking for you now.";
+    return [{
+      text:"Hello \ud83d\udc4b This is the automated assistant for *URO-CARE Urology & Andrology Center* in Nairobi.\n\n" +
+           "I can book you a consultation or explain our services. Ask for the front desk at any point and a person takes over. What you share here stays between you and the clinic.\n\n" +
+           status,
+      wait:600, quiet:true, list:MENU
+    }];
+  };
 
   /* ---------- screens and navigation ---------- */
   const booking = {};
@@ -756,7 +788,7 @@
       setPaused(true);
       systemNotice('Automated replies paused. Waiting for reception to reply.');
       return [{
-        text:"I've passed this to our front desk. Someone will reply here during working hours.\n\n" + HOURS_LINE,
+        text:"I've passed this to our front desk. " + replyWindow() + "\n\n" + HOURS_LINE,
         wait:700,
         buttons:[{label:'Back to assistant', value:'nav:resume'}, NAV_MENU]
       }];
@@ -838,7 +870,7 @@
   function handoff(){
     setPaused(true);
     state.mode = 'human';
-    systemNotice('Automated replies paused. The message is unread and waiting for reception.');
+    systemNotice('Automated replies paused. ' + (openState().open ? 'The message is unread and waiting for reception.' : 'Clinic closed \u2014 reception picks up ' + openState().when + '.'));
     return [];                       // the bot says nothing at all
   }
 
